@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-CAM · Анализ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:        #080c10;
+            --panel:     #0d1117;
+            --border:    rgba(0,200,150,.15);
+            --accent:    #00c896;
+            --accent2:   #0af;
+            --red:       #f03;
+            --amber:     #f90;
+            --text:      #c8d8e0;
+            --muted:     #4a6070;
+            --scan:      rgba(0,200,150,.04);
+            --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+            --font-main: 'Rajdhani', 'Arial Narrow', Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Rajdhani', sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Scanlines overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    var(--scan) 2px,
+                    var(--scan) 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        /* Grid background */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                    linear-gradient(rgba(0,200,150,.03) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0,200,150,.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--panel);
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            animation: scanH 3s linear infinite;
+        }
+
+        @keyframes scanH {
+            from { transform: translateX(-100%); }
+            to   { transform: translateX(100%); }
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px; height: 36px;
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0,200,150,.08);
+        }
+
+        .logo-icon svg { width: 20px; height: 20px; fill: var(--accent); }
+
+        .logo-text {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 15px;
+            color: var(--accent);
+            letter-spacing: 3px;
+        }
+
+        .logo-sub {
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 2px;
+            margin-top: 2px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .status-pill.online  { background: rgba(0,200,150,.1); border: 1px solid var(--accent); color: var(--accent); }
+        .status-pill.offline { background: rgba(255,0,51,.1);  border: 1px solid var(--red);    color: var(--red); }
+
+        .status-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+        .ping-badge {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            color: var(--amber);
+            letter-spacing: 1px;
+        }
+
+        /* IP input */
+        .ip-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .ip-label {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 1px;
+            white-space: nowrap;
+        }
+
+        .ip-input {
+            flex: 1;
+            max-width: 200px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--accent);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 13px;
+            padding: 6px 10px;
+            outline: none;
+            transition: border-color .2s;
+        }
+
+        .ip-input:focus { border-color: var(--accent); }
+
+        .ip-btn {
+            background: rgba(0,200,150,.1);
+            border: 1px solid var(--accent);
+            border-radius: 3px;
+            color: var(--accent);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            padding: 7px 16px;
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: background .2s;
+        }
+
+        .ip-btn:hover { background: rgba(0,200,150,.2); }
+
+        /* Main grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 16px;
+        }
+
+        @media (max-width: 800px) {
+            .main-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Panel */
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,200,150,.03);
+        }
+
+        .panel-title {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--muted);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .panel-badge {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 2px;
+            letter-spacing: 1px;
+        }
+
+        /* Camera */
+        .cam-body {
+            position: relative;
+            aspect-ratio: 4/3;
+            background: #000;
+        }
+
+        #cam-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            opacity: .9;
+        }
+
+        .cam-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .corner {
+            position: absolute;
+            width: 20px; height: 20px;
+            border-color: var(--accent);
+            border-style: solid;
+            opacity: .7;
+        }
+
+        .tl { top: 12px; left: 12px;  border-width: 2px 0 0 2px; }
+        .tr { top: 12px; right: 12px; border-width: 2px 2px 0 0; }
+        .bl { bottom: 12px; left: 12px;  border-width: 0 0 2px 2px; }
+        .br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; }
+
+        .scan-line {
+            position: absolute;
+            left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: .4;
+            animation: scanV 4s linear infinite;
+        }
+
+        @keyframes scanV {
+            from { top: 0; }
+            to   { top: 100%; }
+        }
+
+        .cam-label {
+            position: absolute;
+            top: 14px;
+            left: 38px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--accent);
+            letter-spacing: 2px;
+            opacity: .8;
+        }
+
+        .cam-rec {
+            position: absolute;
+            top: 12px;
+            right: 36px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--red);
+            opacity: .9;
+        }
+
+        .rec-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--red);
+            animation: blink .8s infinite;
+        }
+
+        .ai-badge-cam {
+            position: absolute;
+            bottom: 14px;
+            left: 14px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 3px;
+            letter-spacing: 2px;
+            transition: all .4s;
+        }
+
+        .cam-time {
+            position: absolute;
+            bottom: 14px;
+            right: 14px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: rgba(255,255,255,.4);
+            letter-spacing: 1px;
+        }
+
+        /* Right panel */
+        .right-panels { display: flex; flex-direction: column; gap: 12px; }
+
+        /* Result bars */
+        .result-body { padding: 16px; }
+
+        .result-row {
+            margin-bottom: 14px;
+        }
+
+        .result-row:last-child { margin-bottom: 0; }
+
+        .result-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .result-name {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .result-val {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 15px;
+            font-weight: bold;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .bar-track {
+            height: 6px;
+            background: rgba(255,255,255,.05);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            width: 0%;
+            transition: width .6s cubic-bezier(.4,0,.2,1);
+            position: relative;
+        }
+
+        .bar-fill::after {
+            content: '';
+            position: absolute;
+            right: 0; top: 0; bottom: 0;
+            width: 4px;
+            filter: blur(2px);
+            background: inherit;
+        }
+        .clear-color    { color: var(--accent); }
+        .humans-color   { color: var(--accent2); }
+        .obstacle-color { color: var(--red); }
+
+        .bar-fill.clear-color    { background: var(--accent); }
+        .bar-fill.humans-color   { background: var(--accent2); }
+        .bar-fill.obstacle-color { background: var(--red); }
+
+        /* Status */
+        .status-body { padding: 16px; }
+
+        .status-big {
+            text-align: center;
+            padding: 18px 12px;
+            border-radius: 4px;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            transition: all .4s;
+            margin-bottom: 12px;
+        }
+
+        /* Telemetry */
+        .tele-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .tele-card {
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 4px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .tele-val {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--accent);
+            line-height: 1;
+        }
+
+        .tele-lbl {
+            font-size: 10px;
+            color: var(--muted);
+            letter-spacing: 1.5px;
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+
+        /* Log */
+        .log-body {
+            padding: 10px 14px;
+            height: 100px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .log-line {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--muted);
+            opacity: .6;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .log-line:last-child { opacity: 1; color: var(--accent); }
+
+        /* Countdown */
+        .countdown {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--muted);
+            text-align: center;
+            padding: 8px;
+            letter-spacing: 1px;
+        }
+
+        /* No signal */
+        .no-signal {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: var(--muted);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            background: rgba(0,0,0,.5);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- Header -->
+    <header>
+        <div class="logo">
+            <div class="logo-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 2C8.1 2 5 5.1 5 9c0 2.4 1.2 4.5 3 5.7V17h8v-2.3c1.8-1.2 3-3.3 3-5.7 0-3.9-3.1-7-7-7zm0 2c2.8 0 5 2.2 5 5s-2.2 5-5 5-5-2.2-5-5 2.2-5 5-5zm-1 12h2v2h-2v-2zm-1 3h4v1h-4v-1z"/></svg>
+            </div>
+            <div>
+                <div class="logo-text">ESP32-CAM · ИИ АНАЛИЗ</div>
+                <div class="logo-sub">СИСТЕМА КОМПЬЮТЕРНОГО ЗРЕНИЯ</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="ping-badge" id="ping-badge">PING: --</div>
+            <div class="status-pill offline" id="status-pill">
+                <div class="status-dot"></div>
+                <span id="status-text">ОТКЛЮЧЕНО</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- IP bar -->
+    <div class="ip-bar">
+        <span class="ip-label">IP КАМЕРЫ</span>
+        <input class="ip-input" id="ip-input" value="192.168.0.137" placeholder="192.168.x.x"/>
+        <button class="ip-btn" onclick="reconnect()">ПОДКЛЮЧИТЬ</button>
+    </div>
+
+    <!-- Main grid -->
+    <div class="main-grid">
+
+        <!-- Camera -->
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">КАМЕРА / ТРАНСЛЯЦИЯ</span>
+                <span class="panel-badge" id="cam-badge" style="background:rgba(255,0,51,.1);border:1px solid #f03;color:#f03">НЕТ СИГНАЛА</span>
+            </div>
+            <div class="cam-body">
+                <img id="cam-img" src="" style="display:none" onerror="onCamError()"/>
+                <div class="no-signal" id="no-signal">
+                    <svg width="32" height="32" fill="none" stroke="#4a6070" stroke-width="1.5" viewBox="0 0 24 24">
+                        <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+                    </svg>
+                    НЕТ СИГНАЛА
+                </div>
+                <div class="cam-overlay">
+                    <div class="scan-line"></div>
+                    <div class="corner tl"></div>
+                    <div class="corner tr"></div>
+                    <div class="corner bl"></div>
+                    <div class="corner br"></div>
+                    <div class="cam-label">CAM_01</div>
+                    <div class="cam-rec"><div class="rec-dot"></div>LIVE</div>
+                    <div class="ai-badge-cam" id="ai-badge-cam" style="display:none"></div>
+                    <div class="cam-time" id="cam-time">--:--:--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right panels -->
+        <div class="right-panels">
+
+            <!-- AI Results -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">РЕЗУЛЬТАТ АНАЛИЗА</span>
+                    <span class="panel-badge" id="ai-ms-badge" style="background:rgba(0,170,255,.1);border:1px solid #0af;color:#0af">-- мс</span>
+                </div>
+                <div class="result-body">
+                    <div class="result-row">
+                        <div class="result-top">
+                            <span class="result-name clear-color">Свободно</span>
+                            <span class="result-val clear-color" id="val-clear">0%</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill clear-color" id="bar-clear"></div>
+                        </div>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-top">
+                            <span class="result-name humans-color">Человек</span>
+                            <span class="result-val humans-color" id="val-humans">0%</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill humans-color" id="bar-humans"></div>
+                        </div>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-top">
+                            <span class="result-name obstacle-color">Препятствие</span>
+                            <span class="result-val obstacle-color" id="val-obstacle">0%</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill obstacle-color" id="bar-obstacle"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">СТАТУС СИСТЕМЫ</span>
+                </div>
+                <div class="status-body">
+                    <div class="status-big" id="status-big"
+                         style="color:#4a6070;background:rgba(74,96,112,.1);border:1px solid rgba(74,96,112,.2)">
+                        ОЖИДАНИЕ
+                    </div>
+                    <div class="tele-grid">
+                        <div class="tele-card">
+                            <div class="tele-val" id="tele-ping">--</div>
+                            <div class="tele-lbl">ПИНГ мс</div>
+                        </div>
+                        <div class="tele-card">
+                            <div class="tele-val" id="tele-ai">--</div>
+                            <div class="tele-lbl">АНАЛИЗ мс</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="countdown" id="countdown">Следующий анализ: --</div>
+            </div>
+
+            <!-- Log -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">ЖУРНАЛ СОБЫТИЙ</span>
+                </div>
+                <div class="log-body" id="log-body">
+                    <div class="log-line">► Система инициализирована</div>
+                    <div class="log-line">► Ожидание подключения...</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    let ip = '192.168.0.137';
+    let lastAiTime = 0;
+    let aiInterval = 3500;
+    let connected = false;
+
+    const labels = { clear: 'Свободно', humans: 'Человек', obstacle: 'Препятствие' };
+    const ruStatus = { clear: 'СВОБОДНО', humans: 'ЧЕЛОВЕК', obstacle: 'ПРЕПЯТСТВИЕ' };
+    const statusStyles = {
+        clear:    { color:'#00c896', bg:'rgba(0,200,150,.1)',  border:'rgba(0,200,150,.3)'  },
+        humans:   { color:'#0af',    bg:'rgba(0,170,255,.1)',  border:'rgba(0,170,255,.3)'  },
+        obstacle: { color:'#f03',    bg:'rgba(255,0,51,.1)',   border:'rgba(255,0,51,.3)'   },
+    };
+
+    function getIP() { return document.getElementById('ip-input').value.trim(); }
+
+    function addLog(msg) {
+        const el = document.getElementById('log-body');
+        const t = new Date().toLocaleTimeString('ru',{hour12:false});
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.textContent = `► [${t}] ${msg}`;
+        el.appendChild(line);
+        while (el.children.length > 6) el.removeChild(el.firstChild);
+    }
+
+    function setOnline(ok) {
+        connected = ok;
+        const pill = document.getElementById('status-pill');
+        const txt  = document.getElementById('status-text');
+        pill.className = 'status-pill ' + (ok ? 'online' : 'offline');
+        txt.textContent = ok ? 'ПОДКЛЮЧЕНО' : 'ОТКЛЮЧЕНО';
+    }
+
+    function refreshCam() {
+        const ip = getIP();
+        const img = new Image();
+        img.onload = () => {
+            const el = document.getElementById('cam-img');
+            el.src = img.src;
+            el.style.display = 'block';
+            document.getElementById('no-signal').style.display = 'none';
+            document.getElementById('ai-badge-cam').style.display = 'block';
+            document.getElementById('cam-badge').textContent = 'ТРАНСЛЯЦИЯ';
+            document.getElementById('cam-badge').style.cssText =
+                'background:rgba(0,200,150,.1);border:1px solid #00c896;color:#00c896';
+        };
+        img.onerror = onCamError;
+        img.src = `http://${ip}/snapshot?t=${Date.now()}`;
+        document.getElementById('cam-time').textContent =
+            new Date().toLocaleTimeString('ru',{hour12:false});
+    }
+
+    function onCamError() {
+        document.getElementById('cam-img').style.display = 'none';
+        document.getElementById('no-signal').style.display = 'flex';
+        document.getElementById('cam-badge').textContent = 'НЕТ СИГНАЛА';
+        document.getElementById('cam-badge').style.cssText =
+            'background:rgba(255,0,51,.1);border:1px solid #f03;color:#f03';
+    }
+
+    async function updateAI() {
+        const ip = getIP();
+        const t0 = Date.now();
+        try {
+            const res = await fetch(`http://${ip}/ai`, {signal: AbortSignal.timeout(3000)});
+            const d   = await res.json();
+            const ping = Date.now() - t0;
+
+            setOnline(true);
+            lastAiTime = Date.now();
+            if (d.ms) aiInterval = parseInt(d.ms) + 800;
+
+            const f = v => Math.round(v * 100) + '%';
+
+            document.getElementById('bar-clear').style.width    = f(d.clear);
+            document.getElementById('bar-humans').style.width   = f(d.humans);
+            document.getElementById('bar-obstacle').style.width = f(d.obstacle);
+            document.getElementById('val-clear').textContent    = f(d.clear);
+            document.getElementById('val-humans').textContent   = f(d.humans);
+            document.getElementById('val-obstacle').textContent = f(d.obstacle);
+
+            // Best label
+            const vals = { clear: d.clear, humans: d.humans, obstacle: d.obstacle };
+            const best = Object.entries(vals).reduce((a,b) => b[1]>a[1]?b:a);
+            const lbl  = best[0], pct = f(best[1]);
+            const s    = statusStyles[lbl];
+
+            const sb = document.getElementById('status-big');
+            sb.textContent = (ruStatus[lbl]||lbl) + ' ' + pct;
+            sb.style.cssText = `text-align:center;padding:18px 12px;border-radius:4px;font-size:22px;font-weight:700;letter-spacing:4px;transition:all .4s;margin-bottom:12px;color:${s.color};background:${s.bg};border:1px solid ${s.border}`;
+
+            const badge = document.getElementById('ai-badge-cam');
+            badge.textContent = (ruStatus[lbl]||lbl) + ' ' + pct;
+            badge.style.cssText = `position:absolute;bottom:14px;left:14px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:bold;padding:5px 12px;border-radius:3px;letter-spacing:2px;transition:all .4s;color:${s.color};background:${s.bg};border:1px solid ${s.border}`;
+
+            document.getElementById('tele-ping').textContent = ping;
+            document.getElementById('tele-ai').textContent   = d.ms || '--';
+            document.getElementById('ping-badge').textContent = `PING: ${ping} мс`;
+            document.getElementById('ai-ms-badge').textContent = `${d.ms||'--'} мс`;
+
+            addLog(`Анализ: ${ruStatus[lbl]} ${pct} | ${ping}мс`);
+
+        } catch(e) {
+            setOnline(false);
+            document.getElementById('ping-badge').textContent = 'PING: --';
+            addLog('Ошибка подключения к ' + ip);
+        }
+    }
+
+    function updateCountdown() {
+        const remain = Math.max(0, aiInterval - (Date.now() - lastAiTime));
+        document.getElementById('countdown').textContent =
+            'Следующий анализ: ' + (remain / 1000).toFixed(1) + ' с';
+    }
+
+    function reconnect() {
+        ip = getIP();
+        addLog('Подключение к ' + ip + '...');
+        refreshCam();
+        updateAI();
+    }
+
+    // Start
+    refreshCam();
+    updateAI();
+    setInterval(refreshCam,       500);
+    setInterval(updateAI,        3500);
+    setInterval(updateCountdown,  200);
+</script>
+</body>
+</html>

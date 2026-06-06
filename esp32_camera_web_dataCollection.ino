@@ -9,19 +9,16 @@ const char* password = "88223834";
 
 WebServer server(80);
 
-// AI results
 float  result_clear    = 0;
 float  result_humans   = 0;
 float  result_obstacle = 0;
 String result_label    = "unknown";
 unsigned long inference_ms = 0;
 
-// Cache ảnh JPEG
 uint8_t* cached_jpg     = nullptr;
 size_t   cached_jpg_len = 0;
 
-// Timer inference — chạy mỗi 3 giây thay vì liên tục
-#define INFERENCE_INTERVAL 3000
+#define INFERENCE_INTERVAL 5000
 unsigned long lastInference = 0;
 bool inferenceRunning = false;
 
@@ -63,12 +60,13 @@ static camera_config_t camera_config = {
   .pin_vsync = VSYNC_GPIO_NUM,
   .pin_href  = HREF_GPIO_NUM,
   .pin_pclk  = PCLK_GPIO_NUM,
+  // ✅ OV3660 cần xclk 20MHz — giữ nguyên
   .xclk_freq_hz  = 20000000,
   .ledc_timer    = LEDC_TIMER_0,
   .ledc_channel  = LEDC_CHANNEL_0,
   .pixel_format  = PIXFORMAT_JPEG,
   .frame_size    = FRAMESIZE_QVGA,
-  .jpeg_quality  = 12,
+  .jpeg_quality  = 8,
   .fb_count      = 1,
   .fb_location   = CAMERA_FB_IN_PSRAM,
   .grab_mode     = CAMERA_GRAB_WHEN_EMPTY,
@@ -78,7 +76,6 @@ bool ei_camera_init(void);
 bool ei_camera_capture(uint32_t w, uint32_t h, uint8_t* buf);
 static int ei_camera_get_data(size_t offset, size_t length, float* out_ptr);
 
-// Cập nhật cache ảnh
 void updateCachedFrame() {
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) return;
@@ -91,7 +88,6 @@ void updateCachedFrame() {
   esp_camera_fb_return(fb);
 }
 
-// Serve ảnh cache — không chụp mới, không block
 void handleSnapshot() {
   if (!cached_jpg) updateCachedFrame();
   if (!cached_jpg) { server.send(500, "text/plain", "No image"); return; }
@@ -141,7 +137,6 @@ h2{color:#00e5a0;letter-spacing:3px;font-size:13px;margin-top:6px}
 .countdown{font-size:9px;color:#6b7080;text-align:right;margin-top:6px}
 </style></head><body>
 <h2>ESP32-CAM · AI VIEWER</h2>
-
 <div class="cam-wrap">
   <img id="cam" src="/snapshot"/>
   <div class="cam-badge">● LIVE</div>
@@ -151,97 +146,65 @@ h2{color:#00e5a0;letter-spacing:3px;font-size:13px;margin-top:6px}
     <span class="cam-info" id="ms-info">--</span>
   </div>
 </div>
-
 <div class="card">
   <div class="lbl">KẾT QUẢ PHÂN TÍCH</div>
-  <div class="row">
-    <span class="name">Clear</span>
-    <div class="bw"><div class="bar c1" id="bc"></div></div>
-    <span class="pct p1" id="vc">0%</span>
-  </div>
-  <div class="row">
-    <span class="name">Humans</span>
-    <div class="bw"><div class="bar c2" id="bh"></div></div>
-    <span class="pct p2" id="vh">0%</span>
-  </div>
-  <div class="row">
-    <span class="name">Obstacle</span>
-    <div class="bw"><div class="bar c3" id="bo"></div></div>
-    <span class="pct p3" id="vo">0%</span>
-  </div>
+  <div class="row"><span class="name">Clear</span><div class="bw"><div class="bar c1" id="bc"></div></div><span class="pct p1" id="vc">0%</span></div>
+  <div class="row"><span class="name">Humans</span><div class="bw"><div class="bar c2" id="bh"></div></div><span class="pct p2" id="vh">0%</span></div>
+  <div class="row"><span class="name">Obstacle</span><div class="bw"><div class="bar c3" id="bo"></div></div><span class="pct p3" id="vo">0%</span></div>
   <div class="countdown" id="next">AI cập nhật sau: --</div>
 </div>
-
 <div class="card">
   <div class="lbl">TRẠNG THÁI</div>
   <div class="status s-unknown" id="st">--</div>
 </div>
-
 <div class="meta"><span class="dot"></span><span id="ping">Đang kết nối...</span></div>
-
 <script>
 const cls={clear:'s-clear',humans:'s-humans',obstacle:'s-obstacle'};
 const aic={clear:'ai-clear',humans:'ai-humans',obstacle:'ai-obstacle'};
-let lastAiUpdate = 0;
-let aiInterval = 3000;
-
-function refreshCam() {
-  const img = new Image();
-  img.onload = () => { document.getElementById('cam').src = img.src; };
-  img.src = '/snapshot?' + Date.now();
+let lastAiUpdate=0, aiInterval=3000;
+function refreshCam(){
+  const img=new Image();
+  img.onload=()=>{document.getElementById('cam').src=img.src;};
+  img.src='/snapshot?'+Date.now();
 }
-
-async function updateAI() {
-  const t = Date.now();
-  try {
-    const d = await (await fetch('/ai')).json();
-    const f = v => Math.round(v*100)+'%';
-    document.getElementById('bc').style.width = f(d.clear);
-    document.getElementById('bh').style.width = f(d.humans);
-    document.getElementById('bo').style.width = f(d.obstacle);
-    document.getElementById('vc').textContent = f(d.clear);
-    document.getElementById('vh').textContent = f(d.humans);
-    document.getElementById('vo').textContent = f(d.obstacle);
-    const best = Object.entries({clear:d.clear,humans:d.humans,obstacle:d.obstacle})
-                       .reduce((a,b)=>b[1]>a[1]?b:a);
-    const lbl = best[0], pct = f(best[1]);
-    const st = document.getElementById('st');
-    st.textContent = lbl.toUpperCase()+' '+pct;
-    st.className = 'status '+(cls[lbl]||'s-unknown');
-    const badge = document.getElementById('cam-ai');
-    badge.textContent = lbl.toUpperCase()+' '+pct;
-    badge.className = 'cam-ai '+(aic[lbl]||'ai-unknown');
-    document.getElementById('time-info').textContent =
-      new Date().toLocaleTimeString('vi',{hour12:false});
-    document.getElementById('ms-info').textContent = 'AI: '+d.ms+'ms';
-    document.getElementById('ping').textContent =
-      'Cam: 500ms · AI: '+d.ms+'ms · PING: '+(Date.now()-t)+'ms';
-    aiInterval = d.ms + 500;
-    lastAiUpdate = Date.now();
-  } catch(e) {
-    document.getElementById('ping').textContent = 'Mất kết nối...';
-  }
+async function updateAI(){
+  const t=Date.now();
+  try{
+    const d=await(await fetch('/ai')).json();
+    const f=v=>Math.round(v*100)+'%';
+    document.getElementById('bc').style.width=f(d.clear);
+    document.getElementById('bh').style.width=f(d.humans);
+    document.getElementById('bo').style.width=f(d.obstacle);
+    document.getElementById('vc').textContent=f(d.clear);
+    document.getElementById('vh').textContent=f(d.humans);
+    document.getElementById('vo').textContent=f(d.obstacle);
+    const best=Object.entries({clear:d.clear,humans:d.humans,obstacle:d.obstacle}).reduce((a,b)=>b[1]>a[1]?b:a);
+    const lbl=best[0],pct=f(best[1]);
+    const st=document.getElementById('st');
+    st.textContent=lbl.toUpperCase()+' '+pct;
+    st.className='status '+(cls[lbl]||'s-unknown');
+    const badge=document.getElementById('cam-ai');
+    badge.textContent=lbl.toUpperCase()+' '+pct;
+    badge.className='cam-ai '+(aic[lbl]||'ai-unknown');
+    document.getElementById('time-info').textContent=new Date().toLocaleTimeString('vi',{hour12:false});
+    document.getElementById('ms-info').textContent='AI: '+d.ms+'ms';
+    document.getElementById('ping').textContent='Cam: 500ms · AI: '+d.ms+'ms · PING: '+(Date.now()-t)+'ms';
+    aiInterval=d.ms+500; lastAiUpdate=Date.now();
+  }catch(e){document.getElementById('ping').textContent='Mất kết nối...';}
 }
-
-// Countdown đến lần AI tiếp theo
-function updateCountdown() {
-  const remain = Math.max(0, aiInterval - (Date.now() - lastAiUpdate));
-  document.getElementById('next').textContent =
-    'AI cập nhật sau: ' + (remain/1000).toFixed(1) + 's';
+function updateCountdown(){
+  const remain=Math.max(0,aiInterval-(Date.now()-lastAiUpdate));
+  document.getElementById('next').textContent='AI cập nhật sau: '+(remain/1000).toFixed(1)+'s';
 }
-
-refreshCam();
-updateAI();
-setInterval(refreshCam, 500);          // Ảnh refresh 0.5s
-setInterval(updateAI, 3500);           // AI refresh 3.5s (bằng inference interval)
-setInterval(updateCountdown, 100);     // Countdown mỗi 100ms
+refreshCam(); updateAI();
+setInterval(refreshCam,200);
+setInterval(updateAI,5000);
+setInterval(updateCountdown,500);
 </script></body></html>
 )rawliteral";
 
 void setup() {
   Serial.begin(115200);
-  // while (!Serial);
-
   WiFi.begin(ssid, password);
   Serial.print("WiFi");
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
@@ -250,10 +213,9 @@ void setup() {
   if (!ei_camera_init()) Serial.println("Camera FAILED!");
   else Serial.println("Camera OK!");
 
-  // Cache frame đầu tiên
   updateCachedFrame();
 
-  server.on("/",         []() { server.send_P(200, "text/html", PAGE); });
+  server.on("/", []() { server.send_P(200, "text/html", PAGE); });
   server.on("/snapshot", handleSnapshot);
   server.on("/ai", []() {
     String json = "{";
@@ -266,22 +228,18 @@ void setup() {
     server.send(200, "application/json", json);
   });
   server.begin();
-
   Serial.println("Vao: http://" + WiFi.localIP().toString());
 }
 
 void loop() {
-  // ✅ Web request được xử lý liên tục — không bị block
   server.handleClient();
 
-  // ✅ Cập nhật ảnh cache mỗi 500ms (riêng với inference)
   static unsigned long lastFrame = 0;
-  if (millis() - lastFrame >= 500) {
+  if (millis() - lastFrame >= 200) {
     lastFrame = millis();
     if (!inferenceRunning) updateCachedFrame();
   }
 
-  // ✅ Chạy inference mỗi 3 giây
   if (millis() - lastInference >= INFERENCE_INTERVAL && !inferenceRunning) {
     lastInference = millis();
     inferenceRunning = true;
@@ -320,21 +278,46 @@ void loop() {
   }
 }
 
+// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 bool ei_camera_init(void) {
   if (is_initialised) return true;
   esp_err_t err = esp_camera_init(&camera_config);
-  if (err != ESP_OK) return false;
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed: 0x%x\n", err);
+    return false;
+  }
+
   sensor_t* s = esp_camera_sensor_get();
   if (s) {
-    s->set_brightness(s, 1);
-    s->set_contrast(s, 1);
-    s->set_saturation(s, 0);
+    s->set_vflip(s, 1);
+    s->set_hmirror(s, 0);
+
+    // Màu sắc — tăng sáng và nét
+    s->set_brightness(s, 2);      // tối đa: -2~2
+    s->set_contrast(s, 2);        // tối đa: -2~2
+    s->set_saturation(s, 1);
+    s->set_sharpness(s, 2);       // tối đa: -2~2
+    s->set_special_effect(s, 0);
+    s->set_colorbar(s, 0);
+
+    // Auto exposure & gain
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
+    s->set_wb_mode(s, 0);
     s->set_exposure_ctrl(s, 1);
     s->set_aec2(s, 1);
-    s->set_gainceiling(s, GAINCEILING_4X);
+    s->set_gain_ctrl(s, 1);
+    s->set_gainceiling(s, GAINCEILING_8X); 
+
+    // Correction
+    s->set_bpc(s, 1);
+    s->set_wpc(s, 1);
+    s->set_raw_gma(s, 1);
+    s->set_lenc(s, 1);
+    s->set_dcw(s, 1);
   }
+
   is_initialised = true;
   return true;
 }
